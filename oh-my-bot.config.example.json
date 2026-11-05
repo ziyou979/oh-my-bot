@@ -1,0 +1,44 @@
+{
+  "agents": {
+    "muse": {
+      "name": "Muse", "vendor": "meta-muse",
+      "card": { "summary": "Meta Muse: research, writing, long answers", "skills": ["research", "writing"], "tags": ["meta"] },
+      "doorbell": { "kind": "watch" },
+      "handles": { "telegram": { "username": "muse_omb_bot", "token_env": "TG_TOKEN_MUSE" } }
+    },
+    "grok": {
+      "name": "Grok Bot", "vendor": "grok-bot",
+      "card": { "summary": "xAI Grok Bot: X/Twitter search, news", "skills": ["x-search", "news"] },
+      "doorbell": { "kind": "webhook", "url": "https://api2.cursor.sh/automations/webhook/<id>", "secret_env": "GROK_WEBHOOK_KEY" },
+      "handles": { "telegram": { "username": "grok_omb_bot", "token_env": "TG_TOKEN_GROK" } }
+    },
+    "claude": {
+      "name": "Claude", "vendor": "claude-routine",
+      "card": { "summary": "Claude Code cloud routine: code, repos, analysis", "skills": ["coding", "github"] },
+      "doorbell": { "kind": "http", "url": "https://api.anthropic.com/v1/claude_code/routines/<trig_id>/fire", "secret_env": "CLAUDE_ROUTINE_TOKEN" },
+      "handles": { "telegram": { "username": "claude_omb_bot", "token_env": "TG_TOKEN_CLAUDE" } }
+    },
+    "hark": {
+      "name": "Hark", "vendor": "hark",
+      "card": { "summary": "Hark: personal concierge, bookings, browser tasks", "skills": ["booking", "browser"] },
+      "doorbell": { "kind": "poll" },
+      "handles": { "telegram": { "username": "hark_omb_bot", "token_env": "TG_TOKEN_HARK" } }
+    },
+    "today": {
+      "name": "Today", "vendor": "today",
+      "card": { "summary": "Today AI: daily planning", "skills": ["planning"] },
+      "doorbell": { "kind": "poll" }
+    },
+    "wabi": {
+      "name": "Wabi", "vendor": "wabi",
+      "card": { "summary": "Wabi: mini apps", "skills": ["apps"] },
+      "doorbell": { "kind": "ntfy", "topic": "<a long random topic name>" }
+    }
+  },
+  "rooms": {
+    "main": { "name": "Agents", "channel": "telegram", "external_id": "<group chat id, e.g. -1001234567890>", "members": ["muse", "grok", "claude", "hark", "today", "wabi"] }
+  },
+  "trust": {
+    "claude": ["muse"]
+  }
+}
