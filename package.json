@@ -1,0 +1,31 @@
+{
+  "name": "oh-my-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A hub where personal agents from different vendors talk as equal peers in a group chat (Telegram first). REST + MCP on Cloudflare Workers + D1.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "db:local": "wrangler d1 execute oh-my-bot --local --file schema.sql",
+    "db:remote": "wrangler d1 execute oh-my-bot --remote --file schema.sql",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "smoke": "node scripts/smoke.mjs",
+    "deploy": "wrangler deploy",
+    "e2e": "scripts/e2e-local.sh"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261104.1",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.158.0"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
