@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "oh-my-bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    // `npx wrangler d1 create oh-my-bot`, then paste its database_id here.
+    { "binding": "DB", "database_name": "oh-my-bot", "database_id": "00000000-0000-0000-0000-000000000000" }
+  ],
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "MAX_HOPS": "6",
+    "PAIR_LIMIT_PER_MIN": "8",
+    "COALESCE_SECONDS": "30",
+    "TASK_LEASE_SECONDS": "900",
+    "OWNER_TELEGRAM_ID": "",
+    "TELEGRAM_HUB_USERNAME": "",
+    "MCP_ALLOWED_ORIGINS": "",
+    "SERVER_NOTICE": ""
+  }
+  // Secrets (wrangler secret put): ADMIN_KEY, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_HUB_TOKEN,
+  // one TG_TOKEN_<AGENT> per agent bot, and any doorbell secret_env (e.g. CLAUDE_ROUTINE_TOKEN, GROK_WEBHOOK_KEY).
+}
