@@ -20,13 +20,33 @@ export async function setup(store: Store = new MemoryStore(), vars: Record<strin
   const calls: Call[] = [];
   let tgId = 9000;
   const respond: { status: number } = { status: 200 };
+  const fileHost: Record<string, string> = {}; // url -> body served by the fake internet
+  const failMethods = new Set<string>(); // Telegram methods that answer an error
   const fakeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const raw = String(init?.body ?? "");
-    let body: unknown = raw;
-    try { body = JSON.parse(raw); } catch { /* text body */ }
+    let body: any;
+    if (init?.body instanceof FormData) {
+      body = {};
+      for (const [k, v] of init.body.entries()) body[k] = typeof v === "string" ? v : { blob: true, name: (v as File).name, type: v.type, size: v.size };
+    } else {
+      const raw = String(init?.body ?? "");
+      body = raw;
+      try { body = JSON.parse(raw); } catch { /* text body */ }
+    }
     calls.push({ url, body, headers: Object.fromEntries(new Headers(init?.headers).entries()) });
-    if (url.startsWith("https://api.telegram.org/")) return Response.json({ ok: true, result: { message_id: ++tgId } });
+    if (fileHost[url]) return new Response(fileHost[url], { headers: { "content-type": "image/png" } });
+    if (url.startsWith("https://api.telegram.org/file/")) return new Response("TGBYTES", { headers: { "content-type": "application/octet-stream", "content-length": "7" } });
+    if (url.startsWith("https://api.telegram.org/")) {
+      const method = url.split("/").pop()!;
+      if (failMethods.has(method)) return Response.json({ ok: false, description: "Bad Request: wrong file identifier/HTTP URL specified" }, { status: 400 });
+      if (method === "getFile") return Response.json({ ok: true, result: { file_id: body.file_id, file_path: "photos/file_1.jpg" } });
+      const id = ++tgId;
+      const f = { file_id: `F${id}`, file_unique_id: `U${id}`, file_size: 1234 };
+      const extra = method === "sendPhoto" ? { photo: [{ ...f, file_id: `S${id}`, width: 90, height: 60 }, { ...f, width: 900, height: 600 }] }
+        : method === "sendDocument" ? { document: { ...f, file_name: "x.pdf", mime_type: "application/pdf" } }
+        : method === "sendVideo" ? { video: { ...f, width: 640, height: 360, duration: 3, mime_type: "video/mp4" } } : {};
+      return Response.json({ ok: true, result: { message_id: id, ...extra } });
+    }
     return new Response("{}", { status: respond.status });
   }) as typeof fetch;
   const env = {
@@ -66,5 +86,5 @@ export async function setup(store: Store = new MemoryStore(), vars: Record<strin
       headers: { "x-telegram-bot-api-secret-token": "tg-secret" },
       body: { update_id: upd++, message: { message_id: 100 + upd, from: { id: Number(from), username: "me" }, chat: { id: Number(CHAT), type: "supergroup" }, text, ...extra } },
     });
-  return { hub, store, clock, calls, respond, keys, http, op, tgUpdate, flush };
+  return { hub, store, clock, calls, respond, keys, http, op, tgUpdate, flush, fileHost, failMethods };
 }

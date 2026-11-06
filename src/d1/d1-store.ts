@@ -1,6 +1,6 @@
 // D1 Store. Atomic methods use a single conditional statement or a D1 batch (one transaction).
 import type { PendingItem, Store } from "../core/store";
-import type { Agent, Delivery, Message, RingLogEntry, RingState, Room, Snapshot, Task, Trust, TrustRules } from "../core/types";
+import type { Agent, Attachment, Delivery, Message, RingLogEntry, RingState, Room, Snapshot, Task, Trust, TrustRules } from "../core/types";
 
 type Row = Record<string, unknown>;
 
@@ -8,7 +8,8 @@ const toMessage = (r: Row): Message => ({
   id: r.id as string, from: r.from_id as string, room: (r.room as string) ?? null, to: JSON.parse(r.to_ids as string),
   body: r.body as string, reply_to: (r.reply_to as string) ?? null, thread_id: r.thread_id as string, rid: r.rid as string,
   hop: Number(r.hop), task_id: (r.task_id as string) ?? null, body_hash: r.body_hash as string,
-  external_id: (r.external_id as string) ?? null, created_at: r.created_at as string,
+  external_id: (r.external_id as string) ?? null, attachments: r.attachments ? JSON.parse(r.attachments as string) : [],
+  media_group: (r.media_group as string) ?? null, created_at: r.created_at as string,
 });
 const toDelivery = (r: Row): Delivery => ({
   message_id: r.message_id as string, agent: r.agent as string, state: r.state as Delivery["state"], trust: r.trust as Trust,
@@ -56,9 +57,10 @@ export class D1Store implements Store {
   async insertMessage(m: Message, ds: { agent: string; trust: Trust }[]) {
     // One transaction: the message row is ignored on a duplicate (from_id, rid); deliveries are inserted only if our row exists.
     await this.db.batch([
-      this.q(`INSERT OR IGNORE INTO messages (id, from_id, room, to_ids, body, reply_to, thread_id, rid, hop, task_id, body_hash, external_id, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        m.id, m.from, m.room, JSON.stringify(m.to), m.body, m.reply_to, m.thread_id, m.rid, m.hop, m.task_id, m.body_hash, m.external_id, m.created_at),
+      this.q(`INSERT OR IGNORE INTO messages (id, from_id, room, to_ids, body, reply_to, thread_id, rid, hop, task_id, body_hash, external_id, attachments, media_group, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        m.id, m.from, m.room, JSON.stringify(m.to), m.body, m.reply_to, m.thread_id, m.rid, m.hop, m.task_id, m.body_hash, m.external_id,
+        m.attachments.length ? JSON.stringify(m.attachments) : null, m.media_group, m.created_at),
       ...ds.map((d) => this.q(`INSERT INTO deliveries (message_id, agent, state, trust, created_at)
               SELECT ?, ?, 'unread', ?, ? WHERE EXISTS (SELECT 1 FROM messages WHERE id = ?)`, m.id, d.agent, d.trust, m.created_at, m.id)),
     ]);
@@ -72,6 +74,10 @@ export class D1Store implements Store {
     return r ? toMessage(r) : null;
   }
   async setExternalId(id: string, ext: string) { await this.q("UPDATE messages SET external_id = ? WHERE id = ?", ext, id).run(); }
+  async setAttachments(id: string, a: Attachment[]) { await this.q("UPDATE messages SET attachments = ? WHERE id = ?", JSON.stringify(a), id).run(); }
+  async listGroup(roomId: string, group: string) {
+    return (await this.all("SELECT * FROM messages WHERE room = ? AND media_group = ? ORDER BY created_at, rowid LIMIT 50", roomId, group)).map(toMessage);
+  }
   async listThread(threadId: string, limit: number) {
     return (await this.all("SELECT * FROM (SELECT *, rowid AS rowid FROM messages WHERE thread_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?) ORDER BY created_at, rowid", threadId, limit)).map(toMessage);
   }

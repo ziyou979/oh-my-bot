@@ -1,6 +1,6 @@
 // In-memory Store. JavaScript runs one microtask at a time and no method awaits mid-update, so every method is atomic.
 import type { PendingItem, Store } from "./store";
-import type { Agent, Delivery, Message, RingLogEntry, RingState, Room, Snapshot, Task, Trust, TrustRules } from "./types";
+import type { Agent, Attachment, Delivery, Message, RingLogEntry, RingState, Room, Snapshot, Task, Trust, TrustRules } from "./types";
 import { TERMINAL } from "./types";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -54,6 +54,8 @@ export class MemoryStore implements Store {
     return m ? clone(m) : null;
   }
   async setExternalId(id: string, ext: string) { const m = this.messages.get(id); if (m) m.external_id = ext; }
+  async setAttachments(id: string, a: Attachment[]) { const m = this.messages.get(id); if (m) m.attachments = clone(a); }
+  async listGroup(roomId: string, group: string) { return this.byTime((m) => m.room === roomId && m.media_group === group, 50); }
   private byTime(filter: (m: Message) => boolean, limit: number) {
     return [...this.messages.values()].filter(filter).sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(-limit).map(clone);
   }

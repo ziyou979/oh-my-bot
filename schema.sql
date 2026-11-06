@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS messages (
   task_id TEXT,
   body_hash TEXT NOT NULL,
   external_id TEXT,
+  attachments TEXT,               -- JSON array of Attachment (references only, never bytes)
+  media_group TEXT,               -- chat-app album id
   created_at TEXT NOT NULL,
   UNIQUE (from_id, rid)
 );
@@ -33,6 +35,7 @@ CREATE INDEX IF NOT EXISTS messages_thread ON messages (thread_id, created_at);
 CREATE INDEX IF NOT EXISTS messages_room ON messages (room, created_at);
 CREATE INDEX IF NOT EXISTS messages_from ON messages (from_id, created_at);
 CREATE INDEX IF NOT EXISTS messages_external ON messages (room, external_id);
+CREATE INDEX IF NOT EXISTS messages_group ON messages (room, media_group);
 CREATE TABLE IF NOT EXISTS deliveries (
   message_id TEXT NOT NULL,
   agent TEXT NOT NULL,

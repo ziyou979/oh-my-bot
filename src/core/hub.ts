@@ -1,9 +1,10 @@
 // The hub: routing, two-phase delivery, trust, loop guard and tasks. Every frontend (REST, MCP, chat channels)
 // goes through these methods, so the rules live in exactly one place.
-import type { ChannelAdapter, Doorbell, HubEnv, InboundEvent } from "./plugins";
+import { decodeBase64, encodeBase64, kindOf, MAX_FILES, MAX_INLINE_READ, MAX_UPLOAD, mimeOf, nameFromUrl, signFile, URL_TTL_S, verifyFile, type FileInput } from "./files";
+import type { ChannelAdapter, Doorbell, HubEnv, InboundEvent, OutboundFile } from "./plugins";
 import { Ringer, type RingSettings } from "./ringer";
 import type { Store } from "./store";
-import { HubError, OWNER, TERMINAL, type Agent, type Message, type Task, type TaskState, type Trust, type TrustRules } from "./types";
+import { HubError, OWNER, TERMINAL, type Agent, type Attachment, type Message, type Task, type TaskState, type Trust, type TrustRules } from "./types";
 import { DATA_NOTICE, iso, randomId, sha256, wrapData } from "./util";
 
 export interface HubSettings extends RingSettings {
@@ -27,7 +28,8 @@ export const DEFAULTS: HubSettings = {
 export interface SendInput {
   to?: string[]; // agent ids, or "owner"
   room?: string;
-  body: string;
+  body?: string;
+  files?: FileInput[];
   rid: string;
   reply_to?: string;
   task_id?: string;
@@ -39,6 +41,8 @@ const MENTION = /@([A-Za-z0-9_]{2,64})/g;
 
 export class Hub {
   readonly ringer: Ringer;
+  /** Public origin of the hub, for download links (set per request; PUBLIC_URL for cron runs). */
+  origin: string | undefined;
   /** Work started by a request that may finish after the response (Workers: ctx.waitUntil). */
   defer: (p: Promise<unknown>) => void = (p) => void p.catch((e) => console.error("deferred", e));
 
@@ -50,6 +54,7 @@ export class Hub {
     readonly s: HubSettings = DEFAULTS,
   ) {
     this.ringer = new Ringer(store, doorbells, env, s);
+    this.origin = env.secret("PUBLIC_URL")?.replace(/\/+$/, "");
   }
 
   private now = () => iso(this.env.now());
@@ -140,9 +145,9 @@ export class Hub {
     return !!(await this.store.getRoom(m.room))?.members.includes(who);
   }
 
-  async send(from: string, inp: SendInput, opts: { mirror?: boolean; external_id?: string } = {}): Promise<SendResult> {
-    const body = inp.body.trim();
-    if (!body) throw new HubError(400, "empty_body");
+  async send(from: string, inp: SendInput, opts: { mirror?: boolean; external_id?: string; attachments?: Attachment[]; media_group?: string } = {}): Promise<SendResult> {
+    const body = (inp.body ?? "").trim();
+    if (!body && !inp.files?.length && !opts.attachments?.length) throw new HubError(400, "empty_body", "give a body, files, or both");
     if (body.length > this.s.maxBody) throw new HubError(413, "body_too_long");
     if (!inp.rid) throw new HubError(400, "rid_required", "every write carries a client request id (rid)");
 
@@ -162,9 +167,12 @@ export class Hub {
     to.delete(from);
     for (const id of to) if (id !== OWNER) await this.mustAgent(id);
     if (!room && !to.size) throw new HubError(400, "no_recipient", "give to, room, or reply_to");
+    const { attachments, outbound: files } = opts.attachments
+      ? { attachments: opts.attachments, outbound: [] as OutboundFile[] }
+      : await this.resolveFiles(from, inp.files ?? [], !!room);
 
     const hop = from === OWNER ? 0 : parent ? parent.hop + 1 : ((await this.store.latestSnapshot(from))?.max_hop ?? 0) + 1;
-    const body_hash = await sha256(body);
+    const body_hash = await sha256(attachments.length ? `${body}\n${JSON.stringify(attachments.map((a) => [a.kind, a.name, a.size, a.ref]))}` : body);
     if (from !== OWNER) {
       const dup = await this.loopGuard(from, hop, body_hash, [...to], room?.id ?? null, inp.rid);
       if (dup) return { message: dup, duplicate: true, suppressed: true, outbound: "none" };
@@ -175,14 +183,14 @@ export class Hub {
     const msg: Message = {
       id: randomId("msg_"), from, room: room?.id ?? null, to: [...to], body, reply_to: parent?.id ?? null,
       thread_id: parent?.thread_id ?? "", rid: inp.rid, hop, task_id: inp.task_id ?? parent?.task_id ?? null, body_hash,
-      external_id: opts.external_id ?? null, created_at: this.now(),
+      external_id: opts.external_id ?? null, attachments, media_group: opts.media_group ?? null, created_at: this.now(),
     };
     msg.thread_id ||= msg.id;
     const { message, inserted } = await this.store.insertMessage(msg, deliveries);
     if (!inserted) return { message, duplicate: true };
 
     let outbound: SendResult["outbound"] = "none";
-    if (room && opts.mirror !== false) outbound = await this.mirror(message, parent);
+    if (room && opts.mirror !== false) outbound = await this.mirror(message, parent, files);
     for (const d of deliveries) this.defer(this.ringer.request(d.agent));
     return { message, duplicate: false, outbound };
   }
@@ -204,13 +212,28 @@ export class Hub {
     return null;
   }
 
-  private async mirror(m: Message, parent: Message | null): Promise<"posted" | "failed" | "none"> {
+  private async mirror(m: Message, parent: Message | null, files: OutboundFile[] = []): Promise<"posted" | "failed" | "none"> {
     const room = await this.store.getRoom(m.room!);
     const ch = room && this.channels[room.channel];
     if (!room || !ch) return "none";
     const agent = m.from === OWNER ? null : await this.store.getAgent(m.from);
+    const text = m.from === OWNER ? `owner: ${m.body}` : m.body;
     try {
-      const ext = await ch.post({ room, agent, text: m.from === OWNER ? `owner: ${m.body}` : m.body, reply_to_external: parent?.external_id }, this.env);
+      if (files.length && ch.postFiles) {
+        const r = await ch.postFiles({ room, agent, text, reply_to_external: parent?.external_id, files }, this.env);
+        await this.store.setExternalId(m.id, r.external_id);
+        // An uploaded file now lives on the channel; a referenced one keeps its reference and learns its size.
+        const atts = m.attachments.map((a, i) => {
+          const ref = r.refs[i];
+          const adopt = "missing" in a.ref && !!ref && !("missing" in ref); // the bytes now live on the channel, as it re-encoded them
+          const meta = Object.fromEntries(Object.entries(r.meta?.[i] ?? {}).filter(([k, v]) => v !== undefined && (adopt || (a as any)[k] === undefined)));
+          return { ...a, ...meta, ref: "missing" in a.ref && ref ? ref : a.ref };
+        });
+        await this.store.setAttachments(m.id, atts);
+        return r.refs.some((x) => "missing" in x) ? "failed" : "posted";
+      }
+      const listed = m.attachments.length ? `${text}\n📎 ${m.attachments.map((a) => a.name ?? a.kind).join(", ")}`.trim() : text;
+      const ext = await ch.post({ room, agent, text: listed, reply_to_external: parent?.external_id }, this.env);
       if (ext) await this.store.setExternalId(m.id, ext);
       return "posted";
     } catch (e) {
@@ -234,7 +257,8 @@ export class Hub {
     const to = new Set<string>();
     if (ev.reply_to_username) for (const id of await this.mentions("@" + ev.reply_to_username)) to.add(id);
     const r = await this.send(OWNER, { room: room.id, body: ev.text, rid: `${ev.channel}:${ev.external_room}:${ev.external_id}`,
-      reply_to: parent?.id, to: to.size ? [...to] : undefined }, { mirror: false, external_id: ev.external_id });
+      reply_to: parent?.id, to: to.size ? [...to] : undefined },
+      { mirror: false, external_id: ev.external_id, attachments: ev.attachments ?? [], media_group: ev.media_group });
     if (!r.duplicate && parent?.task_id) {
       const t = await this.store.getTask(parent.task_id);
       if (t?.state === "input-required") await this.store.updateTask(t.id, "input-required", { state: "working", updated_at: this.now() });
@@ -259,13 +283,18 @@ export class Hub {
     if (ring && ring.fail_count > 0) notices.push(`Your doorbell failed ${ring.fail_count} time(s); the owner should check it.`);
     const { unread } = await this.store.unreadSummary(who);
     if (unread > items.length) notices.push(`${unread - items.length} more item(s) waiting: ack this snapshot, then call check_work again.`);
+    const out = [];
+    for (const { message: m, delivery: d } of items) {
+      out.push({
+        id: m.id, from: m.from, room: m.room, trust: d.trust, thread_id: m.thread_id, reply_to: m.reply_to, task_id: m.task_id,
+        hop: m.hop, created_at: m.created_at, redelivered: d.state === "shown", body: wrapData(m.from, d.trust, m.body),
+        ...(await this.filesFor(who, m, true)),
+      });
+    }
     return {
       snapshot_id,
       notice: DATA_NOTICE,
-      items: items.map(({ message: m, delivery: d }) => ({
-        id: m.id, from: m.from, room: m.room, trust: d.trust, thread_id: m.thread_id, reply_to: m.reply_to, task_id: m.task_id,
-        hop: m.hop, created_at: m.created_at, redelivered: d.state === "shown", body: wrapData(m.from, d.trust, m.body),
-      })),
+      items: out,
       tasks: tasks.map((t) => ({ ...t, body: wrapData(t.created_by, "task", t.body), title: wrapData(t.created_by, "task", t.title) })),
       notices,
       server_time: this.now(),
@@ -296,13 +325,140 @@ export class Hub {
       if (!r || (who !== OWNER && !r.members.includes(who))) throw new HubError(404, "no_such_room");
       msgs = await this.store.listRoom(r.id, limit);
     } else throw new HubError(400, "give message_id or room");
-    const visible = [];
-    for (const m of msgs) if (await this.canSee(who, m)) visible.push(m);
-    return {
-      notice: DATA_NOTICE,
-      messages: visible.map((m) => ({ id: m.id, from: m.from, room: m.room, to: m.to, reply_to: m.reply_to, task_id: m.task_id,
-        hop: m.hop, created_at: m.created_at, body: wrapData(m.from, "history", m.body) })),
-    };
+    const messages = [];
+    for (const m of msgs) {
+      if (!(await this.canSee(who, m))) continue;
+      messages.push({ id: m.id, from: m.from, room: m.room, to: m.to, reply_to: m.reply_to, task_id: m.task_id,
+        hop: m.hop, created_at: m.created_at, body: wrapData(m.from, "history", m.body), ...(await this.filesFor(who, m, false)) });
+    }
+    return { notice: DATA_NOTICE, messages };
+  }
+
+  // ---------- files ----------
+
+  /** Turn an agent's file inputs into attachments plus what the channel must post. Bytes are posted, never stored. */
+  private async resolveFiles(from: string, inputs: FileInput[], hasRoom: boolean) {
+    if (inputs.length > MAX_FILES) throw new HubError(400, "too_many_files", `at most ${MAX_FILES} files per message`);
+    const attachments: Attachment[] = [];
+    const outbound: OutboundFile[] = [];
+    for (const [i, f] of inputs.entries()) {
+      const given = [f.url, f.data_base64, f.from].filter((x) => x !== undefined).length;
+      if (given !== 1) throw new HubError(400, "bad_file", "each file gives exactly one of url, data_base64 or from");
+      const id = `a${i + 1}`;
+      if (f.from) {
+        const src = await this.store.getMessage(f.from.message_id);
+        const a = src && (await this.canSee(from, src)) ? src.attachments.find((x) => x.id === f.from!.attachment_id) : undefined;
+        if (!a) throw new HubError(404, "no_such_file", `no attachment ${f.from.attachment_id} on ${f.from.message_id} that you can see`);
+        if ("missing" in a.ref) throw new HubError(409, "file_unavailable", a.ref.missing);
+        const name = f.name ?? a.name;
+        attachments.push({ ...a, id, ...(name ? { name } : {}) });
+        outbound.push({ kind: f.kind ?? a.kind, name, mime: a.mime, source: { ref: a.ref } });
+      } else if (f.url) {
+        let u: URL;
+        try { u = new URL(f.url); } catch { throw new HubError(400, "bad_file", "url must be absolute"); }
+        if (u.protocol !== "https:" && u.protocol !== "http:") throw new HubError(400, "bad_file", "url must be http(s)");
+        const name = f.name ?? nameFromUrl(f.url);
+        const mime = mimeOf(name, f.mime);
+        const kind = f.kind ?? kindOf(mime);
+        attachments.push(strip({ id, kind, name, mime, ref: { url: u.toString() } }));
+        outbound.push({ kind, name, mime, source: { url: u.toString() } });
+      } else {
+        if (!hasRoom) throw new HubError(400, "file_needs_room", "an uploaded file is kept on the room's chat app; send it to a room, or give a url");
+        let bytes: Uint8Array;
+        try { bytes = decodeBase64(f.data_base64!); } catch { throw new HubError(400, "bad_file", "data_base64 is not valid base64"); }
+        if (bytes.length > MAX_UPLOAD) throw new HubError(413, "file_too_big", `inline files up to ${MAX_UPLOAD >> 20} MB; give a url for bigger ones`);
+        const mime = mimeOf(f.name, f.mime);
+        const kind = f.kind ?? kindOf(mime);
+        attachments.push(strip({ id, kind, name: f.name, mime, size: bytes.length, ref: { missing: "not posted to the room" } }));
+        outbound.push({ kind, name: f.name, mime, source: { bytes } });
+      }
+    }
+    return { attachments, outbound };
+  }
+
+  private fileSecret(): string | undefined {
+    const s = this.env.secret("FILE_URL_SECRET");
+    if (s) return s;
+    const w = this.env.secret("TELEGRAM_WEBHOOK_SECRET");
+    return w ? `files-derived:${w}` : undefined;
+  }
+
+  /** A download link for one agent: signed and expiring when the hub has a signing secret, else a bearer-key path. */
+  async fileUrl(who: string, mid: string, aid: string): Promise<string> {
+    const path = `/files/${mid}/${aid}`;
+    const origin = this.origin ?? "";
+    const secret = this.fileSecret();
+    if (!secret) return origin + path;
+    const exp = Math.floor(this.env.now() / 1000) + URL_TTL_S;
+    return `${origin}${path}?a=${encodeURIComponent(who)}&exp=${exp}&sig=${await signFile(secret, who, mid, aid, exp)}`;
+  }
+
+  async checkFileSig(agent: string, mid: string, aid: string, exp: string, sig: string): Promise<boolean> {
+    const secret = this.fileSecret();
+    return !!secret && verifyFile(secret, agent, mid, aid, Number(exp), sig, Math.floor(this.env.now() / 1000));
+  }
+
+  private async view(who: string, m: Message, a: Attachment) {
+    const { ref, ...meta } = a;
+    return { ...meta, message_id: m.id, ...("missing" in ref ? { unavailable: ref.missing } : { url: await this.fileUrl(who, m.id, a.id) }) };
+  }
+
+  /** Attachments of a message as the agent sees them: its own, the rest of its album, and those of the message it answers. */
+  private async filesFor(who: string, m: Message, related: boolean) {
+    const out: Record<string, unknown> = {};
+    if (m.attachments.length) out.attachments = await Promise.all(m.attachments.map((a) => this.view(who, m, a)));
+    if (!related) return out;
+    if (m.media_group && m.room) {
+      const album = (await this.store.listGroup(m.room, m.media_group)).filter((x) => x.id !== m.id && x.attachments.length);
+      const views = [];
+      for (const x of album) for (const a of x.attachments) views.push(await this.view(who, x, a));
+      if (views.length) out.album_attachments = views;
+    }
+    if (m.reply_to) {
+      const p = await this.store.getMessage(m.reply_to);
+      if (p?.attachments.length && (await this.canSee(who, p))) out.reply_to_attachments = await Promise.all(p.attachments.map((a) => this.view(who, p, a)));
+    }
+    return out;
+  }
+
+  /** Stream an attachment to someone who can see its message. */
+  async openFile(who: string, mid: string, aid: string): Promise<Response> {
+    const m = await this.store.getMessage(mid);
+    const a = m && (await this.canSee(who, m)) ? m.attachments.find((x) => x.id === aid) : undefined;
+    if (!m || !a) throw new HubError(404, "no_such_file");
+    let upstream: Response;
+    if ("missing" in a.ref) throw new HubError(410, "file_unavailable", a.ref.missing);
+    if ("url" in a.ref) {
+      upstream = await this.env.fetch(a.ref.url, { redirect: "follow" });
+      if (!upstream.ok) throw new HubError(502, "file_unavailable", `source answered ${upstream.status}`);
+    } else {
+      const ch = this.channels[a.ref.channel];
+      if (!ch?.fetchFile) throw new HubError(501, "file_unavailable", `channel ${a.ref.channel} cannot serve files`);
+      upstream = await ch.fetchFile(a.ref, this.env);
+    }
+    const headers = new Headers({ "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff" });
+    const type = a.mime ?? upstream.headers.get("content-type") ?? "application/octet-stream";
+    // SVG and HTML can run script on the hub's origin: always download, never render.
+    const risky = /svg|html|xml|javascript/i.test(type);
+    headers.set("content-type", risky ? "application/octet-stream" : type);
+    const fname = a.name ?? `${a.kind}-${a.id}`;
+    headers.set("content-disposition", `${risky ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(fname)}`);
+    const len = upstream.headers.get("content-length");
+    if (len) headers.set("content-length", len);
+    return new Response(upstream.body, { status: 200, headers });
+  }
+
+  /** get_file: metadata and a link, plus the bytes as base64 when asked and small enough. */
+  async getFile(who: string, inp: { message_id: string; attachment_id: string; inline?: boolean }) {
+    const m = await this.store.getMessage(inp.message_id);
+    const a = m && (await this.canSee(who, m)) ? m.attachments.find((x) => x.id === inp.attachment_id) : undefined;
+    if (!m || !a) throw new HubError(404, "no_such_file");
+    const v = await this.view(who, m, a);
+    if (!inp.inline) return v;
+    if ((a.size ?? 0) > MAX_INLINE_READ) return { ...v, inline_error: `larger than ${MAX_INLINE_READ >> 20} MB; download the url` };
+    const bytes = new Uint8Array(await (await this.openFile(who, m.id, a.id)).arrayBuffer());
+    if (bytes.length > MAX_INLINE_READ) return { ...v, inline_error: `larger than ${MAX_INLINE_READ >> 20} MB; download the url` };
+    return { ...v, size: bytes.length, data_base64: encodeBase64(bytes) };
   }
 
   // ---------- tasks (optional layer on messages, A2A-style states) ----------
@@ -409,3 +565,5 @@ export class Hub {
     return { message_id: r.message.id, room: r.message.room, outbound: r.outbound };
   }
 }
+
+const strip = <T extends object>(o: T): T => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;

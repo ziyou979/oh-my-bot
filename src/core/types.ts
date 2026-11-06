@@ -49,6 +49,27 @@ export interface Room {
 export type TrustRules = Record<string, string[]>;
 export type Trust = "owner" | "delegated" | "peer";
 
+export type AttachmentKind = "photo" | "video" | "animation" | "document" | "audio" | "voice" | "video_note" | "sticker";
+
+/** Where an attachment's bytes live. Never shown to agents: a chat app's file id is useless without that bot's token. */
+export type AttachmentRef =
+  | { channel: string; file_id: string; token_env?: string } // token_env: the bot that holds the file id (unset = hub bot)
+  | { url: string }
+  | { missing: string }; // the upload failed; the reason
+
+/** A file on a message: a photo, video, PDF, voice note... The hub stores references, never the bytes. */
+export interface Attachment {
+  id: string;
+  kind: AttachmentKind;
+  name?: string;
+  mime?: string;
+  size?: number;
+  width?: number;
+  height?: number;
+  duration?: number;
+  ref: AttachmentRef;
+}
+
 export interface Message {
   id: string;
   from: string; // agent id or OWNER
@@ -62,6 +83,8 @@ export interface Message {
   task_id: string | null;
   body_hash: string;
   external_id: string | null; // id of the mirrored post on the room's channel
+  attachments: Attachment[];
+  media_group: string | null; // chat-app album id: photos sent together arrive as separate messages
   created_at: string;
 }
 

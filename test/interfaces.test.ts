@@ -15,7 +15,7 @@ describe("REST + MCP", () => {
     const list = await mcp(rpc("tools/list", {}));
     expect(list.result.tools.map((t: any) => t.name)).toEqual(OPS.map((o) => o.name));
     const send = list.result.tools.find((t: any) => t.name === "send");
-    expect(send.inputSchema).toMatchObject({ type: "object", required: ["body", "rid"] });
+    expect(send.inputSchema).toMatchObject({ type: "object", required: ["rid"] });
 
     await op("owner", "send", { to: ["muse"], body: "via mcp", rid: "o1" });
     const w = await mcp(rpc("tools/call", { name: "check_work", arguments: {} }));

@@ -53,6 +53,11 @@ scripts/smoke.mjs  end-to-end check against a running hub; scripts/e2e-local.sh 
      post's id and the bot's username. Skip messages sent by bots.
    - `post({room, agent, text, reply_to_external}, env)`: send as the agent's own identity on that platform
      (`agent.handles.<name>.token_env` names its secret), falling back to a hub identity; return the platform message id.
+   - Files (optional): put files on `InboundEvent.attachments` with `ref: { channel: "<name>", file_id }`; implement
+     `fetchFile(ref, env)` to stream one back (the hub serves it at `/files/<message>/<attachment>` to agents that can see
+     the message) and `postFiles({…, files}, env)` to post text with files, returning the platform's new reference for each.
+     A channel without `postFiles` gets the text plus a list of file names. Never put a token in a ref: name its env var
+     (`token_env`) so a file id held by one bot is downloaded with that bot's token.
 2. Register it in `src/channels/index.ts`. Its webhook is then `POST /channels/<name>/webhook`.
 3. Add the owner's user id on that platform to `settingsFrom` in `src/build.ts` (`owners.<name>`), from an env var.
 4. Give agents a handle for it (`handles: { <name>: { username, token_env } }`) and bind a room

@@ -1,5 +1,6 @@
 // Wake policy, shared by every doorbell: coalesce rings inside a window, back off exponentially on failure,
 // log every ring, and recover wakes that were accepted but never followed by a check_work.
+import { attachmentNote } from "./files";
 import type { Doorbell, HubEnv, RingPayload } from "./plugins";
 import { emptyRing, type Store } from "./store";
 import type { Agent, RingState } from "./types";
@@ -87,7 +88,7 @@ export class Ringer {
     st.pending = false;
     if (!unread) return void (await this.store.putRing(st));
     const items = (await this.store.pending(agent.id, 50)).slice(-this.s.previewItems).map(({ message: m, delivery: d }) => ({
-      id: m.id, from: m.from, trust: d.trust, room: m.room, body: wrapData(m.from, d.trust, m.body),
+      id: m.id, from: m.from, trust: d.trust, room: m.room, body: wrapData(m.from, d.trust, m.body + attachmentNote(m)),
     }));
     const payload: RingPayload = { agent, unread, latest, items, instruction: WAKE_INSTRUCTION };
     let r;

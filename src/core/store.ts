@@ -1,6 +1,6 @@
 // Persistence boundary. Two implementations: MemoryStore (tests, Node server) and D1Store (Workers).
 // Methods that must be atomic say so; every implementation has to honour that.
-import type { Agent, Delivery, Message, RingLogEntry, RingState, Room, Snapshot, Task, Trust, TrustRules } from "./types";
+import type { Agent, Attachment, Delivery, Message, RingLogEntry, RingState, Room, Snapshot, Task, Trust, TrustRules } from "./types";
 
 export interface PendingItem { delivery: Delivery; message: Message }
 
@@ -28,6 +28,9 @@ export interface Store {
   getMessage(id: string): Promise<Message | null>;
   messageByExternal(room: string, externalId: string): Promise<Message | null>;
   setExternalId(id: string, externalId: string): Promise<void>;
+  setAttachments(id: string, attachments: Attachment[]): Promise<void>;
+  /** Messages of one chat-app album in a room, oldest first. */
+  listGroup(roomId: string, group: string): Promise<Message[]>;
   listThread(threadId: string, limit: number): Promise<Message[]>;
   listRoom(roomId: string, limit: number): Promise<Message[]>;
   /** Messages sent by `from` since `since` (ISO), newest first; for rate limits and duplicate suppression. */

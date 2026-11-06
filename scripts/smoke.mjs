@@ -12,12 +12,19 @@ const port = Number(process.env.CAPTURE_PORT ?? 8788);
 const captured = [];
 let nextId = 5000;
 const server = createServer((req, res) => {
-  let b = "";
-  req.on("data", (c) => (b += c));
+  const chunks = [];
+  req.on("data", (c) => chunks.push(c));
   req.on("end", () => {
-    captured.push({ path: req.url, body: JSON.parse(b || "{}") });
+    const raw = Buffer.concat(chunks);
+    const multipart = (req.headers["content-type"] ?? "").startsWith("multipart/");
+    if (req.url.includes("/file/bot")) { res.setHeader("content-type", "application/octet-stream"); res.end("SMOKE-FILE-BYTES"); return; }
+    captured.push({ path: req.url, body: multipart ? { multipart: raw.toString("latin1") } : JSON.parse(raw.toString() || "{}") });
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ ok: true, result: { message_id: ++nextId } }));
+    const method = req.url.split("/").pop();
+    if (method === "getFile") { res.end(JSON.stringify({ ok: true, result: { file_id: "x", file_path: "photos/p.jpg" } })); return; }
+    const id = ++nextId;
+    const extra = method === "sendPhoto" ? { photo: [{ file_id: `P${id}`, file_unique_id: `U${id}`, width: 1, height: 1, file_size: 68 }] } : {};
+    res.end(JSON.stringify({ ok: true, result: { message_id: id, ...extra } }));
   });
 }).listen(port);
 
@@ -67,6 +74,20 @@ try {
   check("Grok receives Muse's @mention via the hub (REST)", g.items.length === 1 && g.items[0].from === "muse" && g.items[0].trust === "peer");
   const w1 = (await call("GET", watch)).json;
   check("watch URL back to zero after ack", w1.unread === 0, JSON.stringify(w1));
+
+  // Files: an owner photo reaches Grok with a signed link that streams the bytes; Muse uploads a PNG to the room.
+  await call("POST", "/channels/telegram/webhook", undefined, { update_id: Date.now() + 1, message: { message_id: 77, from: { id: Number(process.env.OWNER_TELEGRAM_ID) },
+    chat: { id: Number(chat), type: "supergroup" }, caption: "@grok_omb_bot 这是什么", photo: [{ file_id: "smoke-photo", width: 4, height: 3, file_size: 16 }] } },
+    { "x-telegram-bot-api-secret-token": process.env.TELEGRAM_WEBHOOK_SECRET });
+  const gw = (await call("POST", "/v1/check_work", kGrok, {})).json;
+  const att = gw.items?.find((i) => i.attachments)?.attachments?.[0];
+  check("photo arrives as an attachment with a signed url", att?.kind === "photo" && /sig=/.test(att?.url ?? ""), att?.url?.replace(/sig=.*/, "sig=…"));
+  const fr = await fetch(att.url);
+  check("signed url streams the file (via getFile)", fr.status === 200 && (await fr.text()) === "SMOKE-FILE-BYTES" && captured.some((c) => c.path.endsWith("/getFile")), String(fr.status));
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+  const up = (await call("POST", "/v1/send", kMuse, { room: "main", body: "一像素", files: [{ data_base64: png, name: "dot.png" }], rid: `smoke-f-${Date.now()}` })).json;
+  const sp = captured.find((c) => c.path === "/botMUSE-SMOKE-TOKEN/sendPhoto");
+  check("upload posted as multipart sendPhoto", up?.outbound === "posted" && /filename="dot.png"/.test(sp?.body.multipart ?? "") && /一像素|\u4e00/.test(Buffer.from(sp?.body.multipart ?? "", "latin1").toString()), up?.outbound);
 } catch (e) {
   console.error(e);
   failed++;

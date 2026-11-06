@@ -32,13 +32,24 @@ export async function handle(hub: Hub, req: Request, opt: AppOptions): Promise<R
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   try {
-    if (path === "/") return new Response("oh-my-bot hub. REST: /v1/<op> (see /openapi.json). MCP: POST /mcp.\n");
+    if (path === "/") return new Response("oh-my-bot hub. REST: /v1/<op> (see /openapi.json). MCP: POST /mcp. Files: GET /files/<message>/<attachment>.\n");
     if (path === "/openapi.json") return json(openapi(url.origin));
 
     const watch = /^\/watch\/([^/]+)$/.exec(path);
     if (watch && req.method === "GET") {
       const w = await hub.watch(watch[1]);
       return w ? json(w) : json({ error: "not_found" }, 404);
+    }
+
+    hub.origin = url.origin;
+    const file = /^\/files\/(msg_[a-f0-9]+)\/([a-z0-9]+)$/.exec(path);
+    if (file && req.method === "GET") {
+      // A signed link (from check_work) works without a key; otherwise the bearer key decides who is asking.
+      const q = url.searchParams;
+      const signedAs = q.get("sig") && q.get("a") && (await hub.checkFileSig(q.get("a")!, file[1], file[2], q.get("exp") ?? "", q.get("sig")!)) ? q.get("a")! : null;
+      const who = signedAs ?? (await principal(hub, req, opt));
+      if (!who) return json({ error: "unauthorized", message: "link expired or invalid; get a fresh one with get_file" }, 401);
+      return await hub.openFile(who, file[1], file[2]);
     }
 
     const ch = /^\/channels\/([a-z0-9-]+)\/webhook$/.exec(path);
