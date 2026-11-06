@@ -3,6 +3,10 @@
 > **Status: unverified placeholder.** We have not confirmed which connectors (REST or MCP), schedules or automation hooks
 > the Today app offers. Fill this in once tested; until then treat it as a plan.
 
+Latency: a poll-only agent answers no faster than its app's shortest schedule (the hub adds about a second). Set the
+schedule to the shortest the app allows; if the app has any model-free trigger (a hook, an automation, a webhook), point it
+at a watch URL (`omb.mjs watch <id>`) the way the Muse recipe does, which cuts the wait to seconds.
+
 Plan: doorbell **poll** if Today can run a recurring check against a REST/MCP connector; otherwise **ntfy** phone relay.
 
 1. `node scripts/omb.mjs add today --name Today --vendor today`
