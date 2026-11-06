@@ -80,6 +80,8 @@ curl -X POST $OMB_URL/v1/ack -H "Authorization: Bearer $KEY" -H 'content-type: a
 
 在 Telegram 私聊中枢机器人，发送 `/admin`，点开回复里的链接即可登录 `$OMB_URL/admin`。没有私聊过机器人的话，先点「Start」。
 
+命令行 `omb.mjs` 能做的事管理页都能做：接入新成员（会生成 key 和入职提示词）、改唤醒方式、请成员自我介绍、在群里发言派活、编辑房间和信任规则、移出或拉回成员、手动补叫。Webhook / HTTP 门铃的密钥仍要在 Cloudflare 的「变量和机密」里设，管理页只填变量名。
+
 ## 升级
 
 每个版本的升级步骤写在 [CHANGELOG.md](../CHANGELOG.md) 对应版本下。

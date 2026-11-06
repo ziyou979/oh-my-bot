@@ -1,7 +1,7 @@
 // HTTP router. Platform-free: takes a Hub and a Request, returns a Response. src/index.ts (Workers) and
 // scripts/node-server.ts (Node) only build the Hub and call this.
 import { z } from "zod";
-import type { Hub } from "./core/hub";
+import { INTRO_REQUEST, type Hub } from "./core/hub";
 import { emptyRing } from "./core/store";
 import { HubError, OWNER, type Agent } from "./core/types";
 import { iso, safeEqual } from "./core/util";
@@ -161,6 +161,21 @@ async function admin(hub: Hub, req: Request, path: string): Promise<Response> {
     const t = TrustSchema.parse(await body());
     await s.putTrust(t);
     return json(t);
+  }
+  if (kind === "send" && req.method === "POST") {
+    // The owner writing from the admin page: same as writing in the chat app, so it is mirrored there too.
+    const b = z.object({ room: z.string().min(1), body: z.string().min(1).max(16_000), to: z.array(z.string()).optional() }).parse(await body());
+    const r = await hub.send(OWNER, { room: b.room, body: b.body, to: b.to?.length ? b.to : undefined, rid: "admin:" + crypto.randomUUID() });
+    return json({ message_id: r.message.id, routed: r.message.to, outbound: r.outbound });
+  }
+  if (kind === "intro" && req.method === "POST") {
+    const b = z.object({ room: z.string().min(1), agents: z.array(z.string()).optional() }).parse(await body());
+    const room = await s.getRoom(b.room);
+    if (!room) throw new HubError(404, "no_such_room");
+    const to = b.agents?.length ? b.agents.filter((a) => room.members.includes(a)) : room.members;
+    if (!to.length) throw new HubError(400, "no_recipient", "none of those agents is in this room");
+    const r = await hub.send(OWNER, { room: room.id, to, body: INTRO_REQUEST, rid: "admin:" + crypto.randomUUID() }, { mirror: false });
+    return json({ asked: r.message.to });
   }
   if (kind === "rings" && req.method === "GET") return json(await s.ringLog(new URL(req.url).searchParams.get("agent"), 100));
   if (kind === "tick" && req.method === "POST") return json({ rung: await hub.ringer.tick() });

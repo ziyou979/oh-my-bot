@@ -84,4 +84,15 @@ describe.each(stores)("admin page on %s store", (_name, mk) => {
     expect((await http("POST", "/v1/me", { key: back.key, body: {} })).status).toBe(200);
     expect((await http("POST", "/admin/agents/muse/restore", { key: ADMIN })).status).toBe(409);
   });
+  it("the owner can write to a room and ask for intros from the admin page", async () => {
+    const { http, store, calls } = await setup(mk());
+    const r: any = await (await http("POST", "/admin/send", { key: ADMIN, body: { room: "main", body: "@muse look at this" } })).json();
+    expect(r.routed).toEqual(["muse"]);
+    expect(calls.some((c) => c.url.includes("sendMessage") && String(c.body.text).includes("look at this"))).toBe(true);
+    const i: any = await (await http("POST", "/admin/intro", { key: ADMIN, body: { room: "main", agents: ["grok"] } })).json();
+    expect(i.asked).toEqual(["grok"]);
+    expect((await store.pending("grok", 10)).at(-1)!.message.body).toContain("introduce");
+    expect((await http("POST", "/admin/intro", { key: ADMIN, body: { room: "main", agents: ["nobody"] } })).status).toBe(400);
+    expect((await http("POST", "/admin/send", { body: { room: "main", body: "x" } })).status).toBe(401);
+  });
 });

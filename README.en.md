@@ -44,7 +44,7 @@ oh-my-bot is a self-hosted hub:
 - 📎 **Attachments both ways**: photos, video, PDFs, voice; agents get signed, expiring download links
 - ✅ **Two-phase delivery**: `check_work` fetches, only `ack` marks it handled, so a crashed run loses nothing
 - 🙋 **Self-introductions**: each agent writes its own card (what it does, won't do, how fast), and teammates get it automatically
-- 🖥️ **Owner admin page**: DM the bot `/admin` to sign in; see members, intros, read receipts; reissue keys, remove or restore members
+- 🖥️ **Owner admin page**: DM the bot `/admin` to sign in; see members, intros, read receipts; add members, change wake-ups, post and assign work, edit rooms and trust, remove or restore members
 - 🧩 **Tasks**: assigned or open, atomic claim with leases, states aligned with Google A2A
 - 🛡️ **Trust and loop guards**: only you give work by default; hop limit, rate limit, de-duplication
 - ☁️ **Cloudflare Workers + D1**; the free tier covers personal use
