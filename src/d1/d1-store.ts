@@ -28,6 +28,12 @@ export class D1Store implements Store {
   private async one(sql: string, ...args: unknown[]) { return (await this.q(sql, ...args).first<Row>()) ?? null; }
   private async all(sql: string, ...args: unknown[]) { return (await this.q(sql, ...args).all<Row>()).results; }
 
+  async useOnce(key: string, expires: string, now: string) {
+    // Rides on the settings table (k, v): k = "once:<key>", v = expiry. Expired entries are pruned as we go.
+    await this.q("DELETE FROM settings WHERE k LIKE 'once:%' AND v < ?", now).run();
+    return !!(await this.one("INSERT OR IGNORE INTO settings (k, v) VALUES (?, ?) RETURNING k", "once:" + key, expires)); // one statement: atomic
+  }
+
   async getAgent(id: string) { const r = await this.one("SELECT * FROM agents WHERE id = ?", id); return r ? toAgent(r) : null; }
   async listAgents() { return (await this.all("SELECT * FROM agents ORDER BY id")).map(toAgent); }
   async putAgent(a: Agent) {

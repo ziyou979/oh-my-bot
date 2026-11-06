@@ -54,7 +54,8 @@ export async function handle(hub: Hub, req: Request, opt: AppOptions): Promise<R
     // The admin page loads without a key; its data calls below need the owner's session or the admin key.
     if (path === "/admin" && req.method === "GET") return html(ADMIN_PAGE);
     if (path === "/admin/login" && req.method === "GET") {
-      const token = adminKey ? await sessionFromLogin(adminKey, url.searchParams.get("t"), hub.env.now()) : null;
+      const token = adminKey ? await sessionFromLogin(adminKey, url.searchParams.get("t"), hub.env.now(),
+        (nonce, expS) => hub.store.useOnce("admin-login:" + nonce, iso(expS * 1000), iso(hub.env.now()))) : null;
       if (!token) return html(LOGIN_FAILED_PAGE, 401);
       return new Response(null, { status: 303, headers: { location: "/admin", "set-cookie": sessionCookie(token), "cache-control": "no-store" } });
     }

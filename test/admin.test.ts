@@ -20,6 +20,7 @@ describe.each(stores)("admin page on %s store", (_name, mk) => {
 
     const login = await http("GET", link.replace("https://hub.test", ""));
     expect(login.status).toBe(303);
+    expect((await http("GET", link.replace("https://hub.test", ""))).status).toBe(401); // single use
     const cookie = login.headers.get("set-cookie")!;
     expect(cookie).toMatch(/HttpOnly; Secure; SameSite=Strict/);
     const jar = cookie.split(";")[0];

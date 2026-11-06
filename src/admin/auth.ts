@@ -1,7 +1,7 @@
 // Owner sign-in for the admin page, with no password to remember and no table to keep.
 //
 //   1. The owner sends /admin to the hub bot in a private chat. Telegram vouches for who sent it.
-//   2. The hub answers with a login link that is good for 10 minutes.
+//   2. The hub answers with a login link that works once, within 10 minutes.
 //   3. Opening it swaps the link for a 12-hour session cookie (HttpOnly, Secure, SameSite=Strict).
 //
 // Both tokens are HMACs keyed by ADMIN_KEY, so rotating ADMIN_KEY signs every browser out.
@@ -41,9 +41,13 @@ async function verify(secret: string, kind: "l" | "s", token: string | null | un
 export const mintLogin = (secret: string, nowMs: number) => mint(secret, "l", Math.floor(nowMs / 1000) + LOGIN_S);
 
 /** A valid login link becomes a session token; anything else becomes null. */
-export async function sessionFromLogin(secret: string, login: string | null, nowMs: number): Promise<string | null> {
+export async function sessionFromLogin(secret: string, login: string | null, nowMs: number,
+  useOnce: (nonce: string, expS: number) => Promise<boolean>): Promise<string | null> {
   const nowS = Math.floor(nowMs / 1000);
-  return (await verify(secret, "l", login, nowS)) ? mint(secret, "s", nowS + SESSION_S) : null;
+  if (!(await verify(secret, "l", login, nowS))) return null;
+  const [, exp, nonce] = login!.split(".");
+  if (!(await useOnce(nonce, Number(exp)))) return null; // a link signs in one browser, once
+  return mint(secret, "s", nowS + SESSION_S);
 }
 
 export const checkSession = (secret: string, token: string | null | undefined, nowMs: number) =>

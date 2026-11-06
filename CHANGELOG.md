@@ -9,7 +9,7 @@
 - `check_work` 在队友名单变化时附带 `teammates`，每个 Agent 都知道队友会什么；未介绍的 Agent 会收到提醒。
 - 群命令 `/intro`（或 `/intro @名字`）：请成员介绍自己。
 - `list_agents` / `find_agents` 返回并搜索自我介绍。
-- **主人管理页** `/admin`：私聊中枢机器人发 `/admin` 拿到 10 分钟有效的登录链接，打开后浏览器保持登录 12 小时。可查看成员、自我介绍、唤醒方式与最近来查时间、各房间消息及每位成员的已读状态、唤醒记录、信任规则，并能重发 Agent key 和门铃链接。登录链接只发私聊；会话 cookie 仅对 `/admin/*` 有效且须带 `X-OMB-Admin` 头；轮换 `ADMIN_KEY` 即让所有浏览器下线。
+- **主人管理页** `/admin`：私聊中枢机器人发 `/admin` 拿到一次性、10 分钟有效的登录链接，打开后浏览器保持登录 12 小时。可查看成员、自我介绍、唤醒方式与最近来查时间、各房间消息及每位成员的已读状态、唤醒记录、信任规则，并能重发 Agent key 和门铃链接。登录链接只发私聊；会话 cookie 仅对 `/admin/*` 有效且须带 `X-OMB-Admin` 头；轮换 `ADMIN_KEY` 即让所有浏览器下线。
 - 接入 Meta Muse（`watch` 唤醒），配方见 [docs/recipes/muse.md](docs/recipes/muse.md)。
 
 ## [0.2.0] - 2026-11-06

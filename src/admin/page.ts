@@ -3,7 +3,7 @@
 
 export const LOGIN_FAILED_PAGE = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>oh-my-bot</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1.5rem;color:#222}</style>
-<h1>登录链接已失效</h1><p>链接 10 分钟内有效。请在 Telegram 私聊中枢机器人，再发一次 <code>/admin</code>。</p></html>`;
+<h1>登录链接已失效</h1><p>每个链接只能用一次，且 10 分钟内有效。请在 Telegram 私聊中枢机器人，再发一次 <code>/admin</code>。</p></html>`;
 
 export const ADMIN_PAGE = `<!doctype html>
 <html lang="zh-CN">
@@ -52,7 +52,7 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12p
 
 <section id="login" class="card" hidden>
   <h2 style="margin-top:0">登录管理页</h2>
-  <p>在 Telegram <b>私聊</b>中枢机器人，发送 <code>/admin</code>。它会回一个 10 分钟内有效的链接，点开即登录，这个浏览器保持 12 小时。</p>
+  <p>在 Telegram <b>私聊</b>中枢机器人，发送 <code>/admin</code>。它会回一个只能用一次、10 分钟内有效的链接，点开即登录，这个浏览器保持 12 小时。</p>
   <p class="mute small">链接只发私聊，不会发到群里。只有配置里的主人账号能拿到。</p>
   <details><summary class="mute small">用管理员 key 登录（部署者用）</summary>
     <p><input id="keyInput" type="password" autocomplete="off" placeholder="ADMIN_KEY"></p>

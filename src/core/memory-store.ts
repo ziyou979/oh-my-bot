@@ -30,6 +30,14 @@ export class MemoryStore implements Store {
     m.set(hash, agent);
   }
 
+  private once = new Map<string, string>();
+  async useOnce(key: string, expires: string, now: string) {
+    for (const [k, e] of this.once) if (e < now) this.once.delete(k);
+    if (this.once.has(key)) return false;
+    this.once.set(key, expires);
+    return true;
+  }
+
   async getRoom(id: string) { return this.rooms.has(id) ? clone(this.rooms.get(id)!) : null; }
   async roomByExternal(channel: string, ext: string) {
     const r = [...this.rooms.values()].find((x) => x.channel === channel && x.external_id === ext);

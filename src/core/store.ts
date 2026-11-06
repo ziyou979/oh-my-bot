@@ -14,6 +14,9 @@ export interface Store {
   setWatchHash(agent: string, hash: string): Promise<void>;
   agentByWatchHash(hash: string): Promise<string | null>;
 
+  /** Atomic: true the first time `key` is used, false ever after (until `expires` passes and it is pruned). */
+  useOnce(key: string, expires: string, now: string): Promise<boolean>;
+
   // rooms and trust rules
   getRoom(id: string): Promise<Room | null>;
   roomByExternal(channel: string, externalId: string): Promise<Room | null>;
