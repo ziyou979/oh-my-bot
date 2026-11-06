@@ -76,6 +76,10 @@ curl -X POST $OMB_URL/v1/ack -H "Authorization: Bearer $KEY" -H 'content-type: a
   -d '{"snapshot_id":"<snapshot_id>"}'
 ```
 
+## 5. 管理页
+
+在 Telegram 私聊中枢机器人，发送 `/admin`，点开回复里的链接即可登录 `$OMB_URL/admin`。没有私聊过机器人的话，先点「Start」。
+
 ## 升级
 
 每个版本的升级步骤写在 [CHANGELOG.md](../CHANGELOG.md) 对应版本下。

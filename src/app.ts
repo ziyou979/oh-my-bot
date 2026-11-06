@@ -4,7 +4,9 @@ import { z } from "zod";
 import type { Hub } from "./core/hub";
 import { emptyRing } from "./core/store";
 import { HubError, OWNER, type Agent } from "./core/types";
-import { safeEqual } from "./core/util";
+import { iso, safeEqual } from "./core/util";
+import { checkSession, clearCookie, cookieValue, mintLogin, sessionCookie, sessionFromLogin } from "./admin/auth";
+import { ADMIN_PAGE, LOGIN_FAILED_PAGE } from "./admin/page";
 import { handleMcp } from "./ops/mcp";
 import { handleRest, openapi } from "./ops/rest";
 
@@ -25,6 +27,10 @@ const TrustSchema = z.record(z.string(), z.array(z.string()));
 const AGENT_ID = /^[a-z][a-z0-9-]{1,31}$/;
 
 const json = (v: unknown, status = 200) => Response.json(v, { status });
+const html = (body: string, status = 200) => new Response(body, { status, headers: {
+  "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-frame-options": "DENY", "referrer-policy": "no-referrer",
+  "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+} });
 
 export interface AppOptions { adminKey?: string; allowedOrigins?: string[] }
 
@@ -42,6 +48,17 @@ export async function handle(hub: Hub, req: Request, opt: AppOptions): Promise<R
     }
 
     hub.origin = url.origin;
+    const adminKey = opt.adminKey && opt.adminKey.length >= 16 ? opt.adminKey : undefined;
+    hub.adminLink = adminKey ? async () => `${url.origin}/admin/login?t=${await mintLogin(adminKey, hub.env.now())}` : undefined;
+
+    // The admin page loads without a key; its data calls below need the owner's session or the admin key.
+    if (path === "/admin" && req.method === "GET") return html(ADMIN_PAGE);
+    if (path === "/admin/login" && req.method === "GET") {
+      const token = adminKey ? await sessionFromLogin(adminKey, url.searchParams.get("t"), hub.env.now()) : null;
+      if (!token) return html(LOGIN_FAILED_PAGE, 401);
+      return new Response(null, { status: 303, headers: { location: "/admin", "set-cookie": sessionCookie(token), "cache-control": "no-store" } });
+    }
+    if (path === "/admin/logout" && req.method === "POST") return new Response(null, { status: 204, headers: { "set-cookie": clearCookie() } });
     const file = /^\/files\/(msg_[a-f0-9]+)\/([a-z0-9]+)$/.exec(path);
     if (file && req.method === "GET") {
       // A signed link (from check_work) works without a key; otherwise the bearer key decides who is asking.
@@ -63,7 +80,10 @@ export async function handle(hub: Hub, req: Request, opt: AppOptions): Promise<R
     }
 
     // Everything below needs a key: the admin key acts as the owner, an agent key as that agent.
-    const who = await principal(hub, req, opt);
+    // The session cookie counts only on /admin/* and only with the X-OMB-Admin header, which a cross-site form cannot set.
+    const viaCookie = path.startsWith("/admin/") && adminKey && req.headers.get("x-omb-admin") === "1"
+      && (await checkSession(adminKey, cookieValue(req), hub.env.now()));
+    const who = viaCookie ? OWNER : await principal(hub, req, opt);
     if (!who) return json({ error: "unauthorized", message: "Authorization: Bearer <key> required" }, 401);
 
     if (path === "/mcp") {
@@ -101,6 +121,7 @@ async function admin(hub: Hub, req: Request, path: string): Promise<Response> {
   const [kind, id, sub] = seg;
 
   if (kind === "agents" && !id && req.method === "GET") return json(await s.listAgents());
+  if (kind === "overview" && req.method === "GET") return json(await overview(hub));
   if (kind === "agents" && id) {
     if (!AGENT_ID.test(id) || id === OWNER) throw new HubError(400, "bad_agent_id", "lowercase letters, digits and dashes, 2-32 chars");
     if (!sub && req.method === "PUT") {
@@ -140,4 +161,25 @@ async function admin(hub: Hub, req: Request, path: string): Promise<Response> {
   if (kind === "rings" && req.method === "GET") return json(await s.ringLog(new URL(req.url).searchParams.get("agent"), 100));
   if (kind === "tick" && req.method === "POST") return json({ rung: await hub.ringer.tick() });
   return json({ error: "not_found" }, 404);
+}
+
+/** Everything the admin page shows, in one call. Doorbell urls and secrets stay out: a webhook url can carry a token. */
+async function overview(hub: Hub) {
+  const s = hub.store;
+  const agents = await Promise.all((await s.listAgents()).map(async (a) => ({
+    id: a.id, name: a.name, vendor: a.vendor, doorbell: a.doorbell.kind, telegram: a.handles.telegram?.username ?? null,
+    own_bot: !!a.handles.telegram?.token_env, card: a.card, intro: a.intro ?? null, created_at: a.created_at,
+    ring: await s.getRing(a.id), inbox: await s.unreadSummary(a.id),
+  })));
+  const rooms = await s.listRooms();
+  const messages: Record<string, unknown[]> = {};
+  for (const r of rooms) {
+    const list = await s.listRoom(r.id, 40);
+    messages[r.id] = await Promise.all(list.map(async (m) => ({
+      id: m.id, from: m.from, to: m.to, body: m.body.slice(0, 3000), created_at: m.created_at, reply_to: m.reply_to, task_id: m.task_id,
+      attachments: (m.attachments ?? []).map((x) => ({ kind: x.kind, name: x.name ?? null })),
+      deliveries: (await s.deliveriesFor(m.id)).map((d) => ({ agent: d.agent, state: d.state, acked_at: d.acked_at })),
+    })));
+  }
+  return { now: iso(hub.env.now()), agents, rooms, messages, trust: await s.getTrust(), rings: await s.ringLog(null, 60) };
 }

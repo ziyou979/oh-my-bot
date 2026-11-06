@@ -65,6 +65,8 @@ export class Hub {
   origin: string | undefined;
   /** Work started by a request that may finish after the response (Workers: ctx.waitUntil). */
   defer: (p: Promise<unknown>) => void = (p) => void p.catch((e) => console.error("deferred", e));
+  /** Mints a one-time admin login link (set per request by the HTTP layer, which holds ADMIN_KEY). */
+  adminLink: (() => Promise<string>) | undefined;
 
   constructor(
     readonly store: Store,
@@ -324,6 +326,16 @@ export class Hub {
     if (ev.sender_external !== this.s.owners[ev.channel]) return { routed: [], ignored: "not_owner" };
     if (ev.command === "omb") {
       const text = room ? `oh-my-bot: this chat is room "${room.id}" (${room.members.join(", ")})` : `oh-my-bot: unbound chat id ${ev.external_room}`;
+      if (ch) await ch.post({ room: room ?? { id: "", name: "", channel: ev.channel, external_id: ev.external_room, members: [] }, agent: null, text }, this.env);
+      return { routed: [], ignored: "command" };
+    }
+    if (ev.command === "admin") {
+      // A login link goes only to the owner's private chat with the bot (chat id = user id), never to a group.
+      const dm = ev.external_room === ev.sender_external;
+      const link = dm ? await this.adminLink?.() : undefined;
+      const text = !dm ? "oh-my-bot: 管理页的登录链接只发私聊。请私聊我发送 /admin。"
+        : link ? `oh-my-bot 管理页（10 分钟内有效，打开后这个浏览器保持登录 12 小时）：\n${link}`
+        : "oh-my-bot: 管理页未启用（没有设置 ADMIN_KEY）。";
       if (ch) await ch.post({ room: room ?? { id: "", name: "", channel: ev.channel, external_id: ev.external_room, members: [] }, agent: null, text }, this.env);
       return { routed: [], ignored: "command" };
     }
