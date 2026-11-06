@@ -96,6 +96,30 @@ npx wrangler deploy                          # 得到 https://oh-my-bot.<you>.wo
 7. 设置 webhook：`OMB_URL=https://oh-my-bot.<you>.workers.dev TELEGRAM_HUB_TOKEN=… TELEGRAM_WEBHOOK_SECRET=… node scripts/omb.mjs telegram-webhook`
 8. 在群里发 `/omb`，hub bot 会回复这个群的 chat id。
 
+### 实测部署记录（2026-11-06，第一次上线时踩过的点）
+
+按上面步骤走通了「群 → 中枢 → Agent → 中枢 → 群」整条链路。补充几处文档里容易漏的：
+
+1. **Cloudflare API token**：在「用户 API 令牌 → 创建令牌 → 自定义」里给 `帐户 → Workers 脚本 → 编辑` 和 `帐户 → D1 → 编辑` 两项即可。不要用 Global API Key。用 token 时设 `CLOUDFLARE_API_TOKEN`，多账号时再设 `CLOUDFLARE_ACCOUNT_ID`。
+2. **新账号要先注册 workers.dev 子域**，否则 `wrangler deploy` 在非交互环境会直接失败。可在 Dashboard 的 Workers onboarding 页注册，或调用 `PUT /accounts/<account_id>/workers/subdomain`，body `{"subdomain":"<名字>"}`。刚注册的子域可能要几分钟才能访问。
+3. **TELEGRAM_HUB_TOKEN 也可以在 Dashboard 填**：Workers → oh-my-bot → 设置 → 变量和机密 → 添加变量，类型选「密钥」。密钥在之后的 `wrangler deploy` 中会保留。
+4. **群隐私**：BotFather 发 `/setprivacy` → 选 hub bot → `Disable`。用 `getMe` 检查，`can_read_all_group_messages` 应为 `true`。
+5. **拿 owner id 和群 chat id**：在设置 webhook **之前**，先把 hub bot 拉进群发一句话，再私聊 bot 发 `/start`，然后调用 `https://api.telegram.org/bot<token>/getUpdates`。`message.from.id` 是你的 user id（填 `OWNER_TELEGRAM_ID`），群消息的 `chat.id`（负数）就是房间的 `external_id`。设了 webhook 之后 `getUpdates` 就不能用了，这时改用群里的 `/omb`。
+6. **顺序**：填 `OWNER_TELEGRAM_ID` → `wrangler deploy` → `omb.mjs telegram-webhook`（或直接 `setWebhook`，带 `secret_token`、`allowed_updates:["message"]`）→ `omb.mjs apply` → `omb.mjs key <agent>`。可用 `getWebhookInfo` 确认 `pending_update_count` 和 `last_error_message`。
+7. **没有自己 bot 的 Agent**：配置里不写 `handles.telegram`，中枢会用 hub bot 以「[名字] …」代发。
+8. **冒烟测试**：
+   ```sh
+   # Agent 在群里发言
+   curl -X POST $OMB_URL/v1/send -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
+     -d '{"room":"main","body":"hello","rid":"hello-1"}'      # 返回 outbound: "posted" 即成功
+   # 你在群里发「@<agent id> 你好」，然后 Agent 收取（check_work 只接受 POST）
+   curl -X POST $OMB_URL/v1/check_work -H "Authorization: Bearer $KEY" -H 'content-type: application/json' -d '{}'
+   # 回复并确认
+   curl -X POST $OMB_URL/v1/reply ... -d '{"message_id":"<id>","body":"收到","rid":"r1"}'
+   curl -X POST $OMB_URL/v1/ack   ... -d '{"snapshot_id":"<snapshot_id>"}'
+   ```
+9. **个人配置不进仓库**：`oh-my-bot.config.json`、本地保存的密钥文件都在 `.gitignore` 里；`wrangler.jsonc` 里填的 `database_id`、`OWNER_TELEGRAM_ID` 也建议只留在本地。
+
 ### 配置 Agent、房间、信任规则
 
 ```sh
