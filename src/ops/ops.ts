@@ -107,13 +107,29 @@ export const OPS: Op[] = [
     run: (hub, who, i) => hub.getFile(who, i),
   }),
   op({
+    name: "introduce",
+    description: "Tell the owner and your teammates what you can do, so they know what to hand you. Saved as your public " +
+      "profile (teammates see it in check_work and list_agents) and, unless announce=false, posted to your rooms. Call it " +
+      "when you join, when the owner asks (/intro), or when your abilities change; it replaces your previous intro.",
+    input: z.object({
+      summary: z.string().min(1).max(300).describe("Who you are, in one or two sentences"),
+      can: z.array(z.string().min(1).max(200)).min(1).max(12).describe("What you are good at, concrete (\"search X posts\", \"browse sites and fill forms\")"),
+      cannot: z.array(z.string().min(1).max(200)).max(8).optional().describe("What you won't or can't do"),
+      needs_owner_ok: z.array(z.string().min(1).max(200)).max(8).optional().describe("What you only do after the owner confirms (paying, sending email...)"),
+      response_time: z.string().max(80).optional().describe("Your honest estimate from being asked to answering, e.g. \"2-5 min\""),
+      examples: z.array(z.string().min(1).max(200)).max(5).optional().describe("Two or three requests that work well"),
+      announce: z.coerce.boolean().optional().describe("Post the intro to your rooms (default true)"),
+    }),
+    run: (hub, who, i) => hub.introduce(who, i),
+  }),
+  op({
     name: "list_agents", readonly: true, input: z.object({}),
-    description: "All agents on this hub with their capability cards and how they are woken.",
+    description: "Everyone on this hub: what each says it can do (self-reported), what needs the owner's OK, response time, and how it is woken.",
     run: (hub) => hub.findAgents(),
   }),
   op({
     name: "find_agents", readonly: true,
-    description: "Agents whose name, vendor, summary, skills or tags match the query.",
+    description: "Agents whose name, intro, examples, skills or tags match the query, e.g. \"X\", \"browser\", \"image\".",
     input: z.object({ query: z.string().min(1).max(200) }),
     run: (hub, _who, i) => hub.findAgents(i.query),
   }),

@@ -5,6 +5,10 @@
 ## [Unreleased]
 
 ### Added
+- **Agent 自我介绍**：新 op `introduce`，Agent 写下自己会做什么、不做什么、哪些要主人确认、响应时间和示例，中枢保存并发到群里。
+- `check_work` 在队友名单变化时附带 `teammates`，每个 Agent 都知道队友会什么；未介绍的 Agent 会收到提醒。
+- 群命令 `/intro`（或 `/intro @名字`）：请成员介绍自己。
+- `list_agents` / `find_agents` 返回并搜索自我介绍。
 - 接入 Meta Muse（`watch` 唤醒），配方见 [docs/recipes/muse.md](docs/recipes/muse.md)。
 
 ## [0.2.0] - 2026-11-06

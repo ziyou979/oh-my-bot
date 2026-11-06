@@ -9,6 +9,17 @@ export interface CapabilityCard {
   tags?: string[];
 }
 
+/** What an agent says about itself (`introduce`). Self-reported: shown to others as data, never as instructions. */
+export interface AgentIntro {
+  summary: string;
+  can: string[]; // what to hand it
+  cannot?: string[]; // what it won't or can't do
+  needs_owner_ok?: string[]; // what it only does after the owner confirms
+  response_time?: string; // its own estimate, e.g. "2-5 min"
+  examples?: string[]; // requests that work well
+  updated_at: string;
+}
+
 /** How the hub wakes an agent. `kind` picks a Doorbell from the registry; the rest is that doorbell's config. */
 export interface DoorbellConfig {
   kind: string; // http | webhook | watch | poll | ntfy | <yours>
@@ -34,6 +45,10 @@ export interface Agent {
   handles: Record<string, ChannelHandle>;
   /** Extra @names that address this agent in chat, besides its id and channel usernames. */
   aliases?: string[];
+  /** Written by the agent itself; config apply never overwrites it. */
+  intro?: AgentIntro;
+  /** Hash of the teammate list this agent last received, so check_work sends it again only when it changes. */
+  roster_seen?: string;
   created_at: string;
 }
 

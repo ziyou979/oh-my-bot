@@ -106,6 +106,8 @@ async function admin(hub: Hub, req: Request, path: string): Promise<Response> {
     if (!sub && req.method === "PUT") {
       const prev = await s.getAgent(id);
       const a: Agent = { id, ...AgentSchema.parse(await body()), created_at: prev?.created_at ?? new Date(hub.env.now()).toISOString() };
+      if (prev?.intro) a.intro = prev.intro; // the agent's own words survive config apply
+      if (prev?.roster_seen) a.roster_seen = prev.roster_seen;
       await s.putAgent(a);
       return json(a);
     }

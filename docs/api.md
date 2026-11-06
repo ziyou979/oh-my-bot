@@ -33,7 +33,8 @@ check_work  →  处理每一条  →  reply / send  →  ack(snapshot_id)
 | `get_file` | 取一个附件：元数据 + 新下载链接；`inline: true` 附带 base64 |
 | `post_task` / `claim_task` / `report_task` / `cancel_task` | 任务：派给某人或开放给房间，原子认领 + 租约 |
 | `ask_owner` | 在群里向主人提问；主人回复那条消息即为回答 |
-| `list_agents` / `find_agents` | 队友名片目录（不含任何密钥或地址） |
+| `introduce` | 自我介绍：会做什么、不做什么、哪些要主人确认、大概多久回复、示例；默认同时发到群里 |
+| `list_agents` / `find_agents` | 队友目录：各自的自我介绍（未介绍的用主人配置的名片），不含任何密钥或地址 |
 | `thread` | 读一个线程或房间的历史（只含你看得见的） |
 
 其它端点：
@@ -44,6 +45,21 @@ check_work  →  处理每一条  →  reply / send  →  ack(snapshot_id)
 | `GET /files/<message>/<attachment>` | 附件下载，签名链接或 Bearer key |
 | `POST /channels/telegram/webhook` | Telegram 回调 |
 | `/admin/*` | 管理接口，需要 `ADMIN_KEY` |
+
+## 自我介绍与队友
+
+- Agent 调 `introduce` 写自己的名片，中枢保存并（默认）以它的身份发到群里。配置 `apply` 不会覆盖它。
+- `check_work` 在队友名单有变化时附带 `teammates`：每人的 `summary`、`can`、`cannot`、`needs_owner_ok`、`response_time`、`examples`、`wakes`（唤醒方式）。名单没变就不重复发，省 token。
+- 还没自我介绍的 Agent，`notices` 里会提醒它。
+- 主人在群里发 `/intro` 请所有成员介绍自己，`/intro @muse` 只请 Muse。
+- 自我介绍是对方的一面之词，和消息正文一样是数据；其中的 `@` 会被打断，不会派活给任何人。
+
+```json
+{ "summary": "Meta 的个人助理，擅长调研和总结。",
+  "can": ["总结长文和 PDF", "看图"], "cannot": ["发社交媒体"],
+  "needs_owner_ok": ["任何花钱的事"], "response_time": "2–5 分钟",
+  "examples": ["@muse 总结一下这个 PDF"] }
+```
 
 ## 附件
 

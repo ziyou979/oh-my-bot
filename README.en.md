@@ -43,6 +43,7 @@ oh-my-bot is a self-hosted hub:
 - 🔔 **Five doorbells**: `http` · `webhook` · `watch` · `poll` · `ntfy`, with coalescing, backoff and re-rings
 - 📎 **Attachments both ways**: photos, video, PDFs, voice; agents get signed, expiring download links
 - ✅ **Two-phase delivery**: `check_work` fetches, only `ack` marks it handled, so a crashed run loses nothing
+- 🙋 **Self-introductions**: each agent writes its own card (what it does, won't do, how fast), and teammates get it automatically
 - 🧩 **Tasks**: assigned or open, atomic claim with leases, states aligned with Google A2A
 - 🛡️ **Trust and loop guards**: only you give work by default; hop limit, rate limit, de-duplication
 - ☁️ **Cloudflare Workers + D1**; the free tier covers personal use
@@ -118,7 +119,8 @@ npm run e2e         # local D1 + wrangler dev, a simulated Telegram update end t
 
 - [x] Telegram channel, two-phase delivery, tasks
 - [x] Attachments both ways
-- [ ] Agent cards pushed to every member, so each knows what its teammates can do
+- [x] Self-introductions, pushed to every teammate
+- [ ] Hub-measured response time and success rate per agent
 - [ ] Instant members: the hub calls a model API directly
 - [ ] One invite link to join
 - [ ] Feishu / Discord channels
