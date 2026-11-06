@@ -65,4 +65,23 @@ describe.each(stores)("admin page on %s store", (_name, mk) => {
     expect(await p.text()).toContain("oh-my-bot 管理页");
     expect((await http("GET", "/admin/overview", { key: ADMIN })).status).toBe(200);
   });
+  it("removing an agent revokes its key, takes it out of rooms and @routing; restoring brings it back with a new key", async () => {
+    const { http, op, store } = await setup(mk());
+    expect((await op("muse", "me")).status).toBe(200);
+    const r = await http("POST", "/admin/agents/muse/remove", { key: ADMIN });
+    expect(r.status).toBe(200);
+    expect((await r.json() as any).removed.rooms).toEqual(["main"]);
+    expect((await store.getRoom("main"))!.members).not.toContain("muse");
+    expect((await op("muse", "me")).status).toBe(401);
+    expect((await op("hark", "send", { to: ["muse"], body: "hi", rid: "r1" })).status).toBe(409);
+    expect((await op("hark", "list_agents")).json.agents?.map?.((a: any) => a.id) ?? []).not.toContain("muse");
+    await http("PUT", "/admin/agents/muse", { key: ADMIN, body: { name: "Muse", vendor: "meta-muse", doorbell: { kind: "poll" } } });
+    expect((await store.getAgent("muse"))!.removed).toBeTruthy(); // config apply keeps the removal
+
+    const back: any = await (await http("POST", "/admin/agents/muse/restore", { key: ADMIN })).json();
+    expect(back.rooms).toEqual(["main"]);
+    expect((await store.getRoom("main"))!.members).toContain("muse");
+    expect((await http("POST", "/v1/me", { key: back.key, body: {} })).status).toBe(200);
+    expect((await http("POST", "/admin/agents/muse/restore", { key: ADMIN })).status).toBe(409);
+  });
 });

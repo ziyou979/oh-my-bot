@@ -49,6 +49,8 @@ export interface Agent {
   intro?: AgentIntro;
   /** Hash of the teammate list this agent last received, so check_work sends it again only when it changes. */
   roster_seen?: string;
+  /** Set when the owner removed the agent: its key and watch link are revoked and it left these rooms. */
+  removed?: { at: string; rooms: string[] };
   created_at: string;
 }
 

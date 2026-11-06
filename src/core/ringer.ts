@@ -30,7 +30,7 @@ export class Ringer {
   /** Called after a delivery. Rings now, or marks the ring pending when inside a coalesce window or backoff. */
   async request(agentId: string): Promise<void> {
     const agent = await this.store.getAgent(agentId);
-    if (!agent) return; // e.g. the owner's own inbox
+    if (!agent || agent.removed) return; // e.g. the owner's own inbox, or an agent the owner removed
     const bell = this.doorbells[agent.doorbell.kind];
     if (!bell || bell.passive) {
       await this.log(agent, bell ? "passive" : "failed", bell ? null : `unknown doorbell ${agent.doorbell.kind}`);
@@ -52,6 +52,7 @@ export class Ringer {
     let rung = 0;
     const now = this.env.now();
     for (const agent of await this.store.listAgents()) {
+      if (agent.removed) continue;
       const bell = this.doorbells[agent.doorbell.kind];
       if (!bell || bell.passive) continue;
       const st = (await this.store.getRing(agent.id)) ?? emptyRing(agent.id);

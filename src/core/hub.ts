@@ -109,6 +109,39 @@ export class Hub {
     return { unread, latest };
   }
 
+  /** Owner action: take the agent out of every room and revoke its key and watch link. Reversible with restore(). */
+  async remove(id: string) {
+    const a = await this.mustAgent(id);
+    if (a.removed) return { agent: id, removed: a.removed };
+    const rooms: string[] = [];
+    for (const r of await this.store.listRooms()) {
+      if (!r.members.includes(id)) continue;
+      rooms.push(r.id);
+      await this.store.putRoom({ ...r, members: r.members.filter((m) => m !== id) });
+    }
+    await this.store.setKeyHash(id, await sha256(randomId("revoked_", 24)));
+    await this.store.setWatchHash(id, await sha256(randomId("revoked_", 24)));
+    a.removed = { at: this.now(), rooms };
+    await this.store.putAgent(a);
+    return { agent: id, removed: a.removed };
+  }
+
+  /** Owner action: put a removed agent back into the rooms it left. Its old key stays dead; a new one is minted. */
+  async restore(id: string) {
+    const a = await this.mustAgent(id);
+    if (!a.removed) throw new HubError(409, "not_removed", `${id} is not removed`);
+    const back: string[] = [];
+    for (const rid of a.removed.rooms) {
+      const r = await this.store.getRoom(rid);
+      if (!r) continue;
+      if (!r.members.includes(id)) await this.store.putRoom({ ...r, members: [...r.members, id] });
+      back.push(rid);
+    }
+    delete a.removed;
+    await this.store.putAgent(a);
+    return { agent: id, rooms: back, key: await this.mintKey(id) };
+  }
+
   private async mustAgent(id: string): Promise<Agent> {
     const a = await this.store.getAgent(id);
     if (!a) throw new HubError(404, "no_such_agent", `no agent ${id}`);
@@ -136,7 +169,7 @@ export class Hub {
     const q = query?.toLowerCase().trim();
     const text = (a: Agent) => [a.id, a.name, a.vendor, a.card.summary, ...a.card.skills, ...(a.card.tags ?? []),
       a.intro?.summary ?? "", ...(a.intro?.can ?? []), ...(a.intro?.examples ?? [])].join(" ").toLowerCase();
-    return (await this.store.listAgents()).filter((a) => !q || text(a).includes(q)).map((a) => this.teammate(a));
+    return (await this.store.listAgents()).filter((a) => !a.removed && (!q || text(a).includes(q))).map((a) => this.teammate(a));
   }
 
   /** One directory entry: the agent's own intro when it wrote one, else the owner's card. */
@@ -186,7 +219,7 @@ export class Hub {
     if (who === OWNER) return null;
     const me = await this.store.getAgent(who);
     if (!me) return null;
-    const mates = (await this.store.listAgents()).filter((a) => a.id !== who).map((a) => this.teammate(a));
+    const mates = (await this.store.listAgents()).filter((a) => a.id !== who && !a.removed).map((a) => this.teammate(a));
     const hash = await sha256(JSON.stringify(mates));
     if (me.roster_seen === hash) return { mates: null, intro: me.intro };
     me.roster_seen = hash;
@@ -208,6 +241,7 @@ export class Hub {
   async mentions(text: string): Promise<string[]> {
     const names = new Map<string, string>();
     for (const a of await this.store.listAgents()) {
+      if (a.removed) continue;
       for (const n of [a.id, ...(a.aliases ?? []), ...Object.values(a.handles).map((h) => h.username)]) names.set(n.toLowerCase(), a.id);
     }
     const out = new Set<string>();
@@ -242,7 +276,7 @@ export class Hub {
     // (The owner reads rooms in the chat app itself, so a room reply does not also fill the owner's hub inbox.)
     if (parent && !inp.to?.length && parent.from !== from && !(room && parent.from === OWNER)) to.add(parent.from);
     to.delete(from);
-    for (const id of to) if (id !== OWNER) await this.mustAgent(id);
+    for (const id of to) if (id !== OWNER && (await this.mustAgent(id)).removed) throw new HubError(409, "agent_removed", `${id} was removed by the owner`);
     if (!room && !to.size) throw new HubError(400, "no_recipient", "give to, room, or reply_to");
     const { attachments, outbound: files } = opts.attachments
       ? { attachments: opts.attachments, outbound: [] as OutboundFile[] }

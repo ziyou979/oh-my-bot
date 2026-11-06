@@ -128,6 +128,10 @@ function agents() {
     const fails = ring.fail_count || 0;
     const color = fails ? "var(--bad)" : ring.last_check_at ? "var(--ok)" : "var(--mute)";
     const lines = (label, xs) => xs && xs.length ? [el("div", { class: "k" }, label), el("ul", { class: "list" }, xs.map((x) => el("li", null, x)))] : [];
+    if (a.removed) return el("div", { class: "card", style: "opacity:.6" },
+      el("h3", null, el("span", { class: "dot", style: "background:var(--mute)" }), a.name, el("span", { class: "mute small" }, a.id)),
+      el("div", { class: "small mute" }, "已于 " + when(a.removed.at) + " 移出，key 和门铃链接已作废。"),
+      el("div", { class: "row", style: "margin-top:.8rem" }, el("button", { class: "btn", onclick: () => restore(a) }, "拉回来")));
     return el("div", { class: "card" },
       el("h3", null, el("span", { class: "dot", style: "background:" + color }), a.name, el("span", { class: "mute small" }, a.id)),
       el("div", { class: "row" },
@@ -147,9 +151,22 @@ function agents() {
            a.card && a.card.summary ? el("div", { class: "small" }, "配置名片：" + a.card.summary) : null],
       el("div", { class: "row", style: "margin-top:.8rem" },
         el("button", { class: "btn danger", onclick: () => reissue(a, "key") }, "重发 key"),
-        a.doorbell === "watch" ? el("button", { class: "btn danger", onclick: () => reissue(a, "watch") }, "重发门铃链接") : null),
+        a.doorbell === "watch" ? el("button", { class: "btn danger", onclick: () => reissue(a, "watch") }, "重发门铃链接") : null,
+        el("button", { class: "btn danger", onclick: () => removeAgent(a) }, "移出群")),
     );
   }));
+}
+async function removeAgent(a) {
+  if (!confirm("把 " + a.name + " 移出所有群？它的 key 和门铃链接会立刻作废，群里 @ 它也不再转给它。之后可以拉回来，但要给它新 key。")) return;
+  try { await api("POST", "/admin/agents/" + encodeURIComponent(a.id) + "/remove"); await load(); } catch (e) { alert("没成功：" + e.message); }
+}
+async function restore(a) {
+  if (!confirm("把 " + a.name + " 拉回原来的群？会生成一个新 key，要填到 " + a.name + " 那边。")) return;
+  try {
+    const r = await api("POST", "/admin/agents/" + encodeURIComponent(a.id) + "/restore");
+    await load();
+    dialog(a.name + " 的新 key", [el("p", null, "已回到：" + (r.rooms.join("、") || "（原来的群都不在了）") + "。key 只显示这一次。"), el("p", { class: "mono card" }, r.key)], r.key);
+  } catch (e) { alert("没成功：" + e.message); }
 }
 async function reissue(a, what) {
   const label = what === "key" ? "key" : "门铃链接";

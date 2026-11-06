@@ -130,9 +130,12 @@ async function admin(hub: Hub, req: Request, path: string): Promise<Response> {
       const a: Agent = { id, ...AgentSchema.parse(await body()), created_at: prev?.created_at ?? new Date(hub.env.now()).toISOString() };
       if (prev?.intro) a.intro = prev.intro; // the agent's own words survive config apply
       if (prev?.roster_seen) a.roster_seen = prev.roster_seen;
+      if (prev?.removed) a.removed = prev.removed; // config apply does not undo a removal
       await s.putAgent(a);
       return json(a);
     }
+    if (sub === "remove" && req.method === "POST") return json(await hub.remove(id));
+    if (sub === "restore" && req.method === "POST") return json({ ...(await hub.restore(id)), note: "key shown once; only its SHA-256 is stored" });
     if (sub === "key" && req.method === "POST") return json({ agent: id, key: await hub.mintKey(id), note: "shown once; only its SHA-256 is stored" });
     if (sub === "watch" && req.method === "POST") {
       const token = await hub.mintWatch(id);
@@ -169,7 +172,7 @@ async function overview(hub: Hub) {
   const s = hub.store;
   const agents = await Promise.all((await s.listAgents()).map(async (a) => ({
     id: a.id, name: a.name, vendor: a.vendor, doorbell: a.doorbell.kind, telegram: a.handles.telegram?.username ?? null,
-    own_bot: !!a.handles.telegram?.token_env, card: a.card, intro: a.intro ?? null, created_at: a.created_at,
+    own_bot: !!a.handles.telegram?.token_env, card: a.card, intro: a.intro ?? null, removed: a.removed ?? null, created_at: a.created_at,
     ring: await s.getRing(a.id), inbox: await s.unreadSummary(a.id),
   })));
   const rooms = await s.listRooms();
